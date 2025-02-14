@@ -88,10 +88,4 @@ Sys.sleep(2)  # Espera 2 segundos entre cada requisição
 
 ---
 
-## 👨‍💻 Autor
-
-👤 **José Tenório Abs Junior**  
-📧 [Seu Email]  
-🏛 **IBPAD - Instituto Brasileiro de Pesquisa e Análise de Dados**  
-
 🚀 **Agora você pode coletar notícias automaticamente!** Qualquer dúvida, me avise! 😊
