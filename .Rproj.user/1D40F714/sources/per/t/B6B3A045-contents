@@ -1,0 +1,117 @@
+# Instale os pacotes necessários (se ainda não estiverem instalados)
+if (!requireNamespace("xml2", quietly = TRUE)) {
+  install.packages("xml2")
+}
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+  install.packages("dplyr")
+}
+if (!requireNamespace("httr", quietly = TRUE)) {
+  install.packages("httr")
+}
+if (!requireNamespace("parsedate", quietly = TRUE)) {
+  install.packages("parsedate")
+}
+
+# Carregue as bibliotecas necessárias
+library(xml2)
+library(dplyr)
+library(httr)
+library(parsedate)
+
+# Função para gerar a URL RSS para cada palavra
+generate_url <- function(query) {
+  base_url <- "https://news.google.com/rss/search?q="
+  paste0(base_url, query, "&hl=pt-BR&gl=BR&ceid=BR:pt-419")
+}
+
+# Lista de palavras para montar as URLs
+queries <- c("lgpd", "anpd")
+
+# Função para extrair os dados do feed RSS e adicionar a coluna com o termo de busca
+extract_rss_data <- function(url, query) {
+  # Criar um arquivo temporário para salvar o conteúdo
+  temp_file <- tempfile(fileext = ".xml")
+  
+  # Fazer a solicitação HTTP com cabeçalhos customizados e salvar no arquivo
+  response <- GET(url, 
+                  add_headers(
+                    "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+                    "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language" = "en-US,en;q=0.5",
+                    "Connection" = "keep-alive"
+                  ),
+                  write_disk(temp_file, overwrite = TRUE))
+  
+  # Verificar se a solicitação foi bem-sucedida
+  if (status_code(response) == 200) {
+    # Ler o conteúdo do arquivo como texto
+    xml_text_content <- readLines(temp_file, warn = FALSE)
+    
+    # Converter qualquer conteúdo de entrada para UTF-8, forçando a conversão, independentemente da codificação original
+    xml_text_content <- iconv(xml_text_content, from = "", to = "UTF-8", sub = "")
+    
+    # Remover caracteres especiais que possam causar problemas
+    xml_text_content <- gsub("&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", xml_text_content, perl = TRUE)
+    
+    # Ler o conteúdo XML do texto corrigido
+    xml_content <- read_xml(paste(xml_text_content, collapse = "\n"))
+    
+    # Extraindo os itens do feed
+    items <- xml_find_all(xml_content, "//item")
+    
+    # Função para extrair o conteúdo de cada nó
+    extract_content <- function(node, tag) {
+      content <- xml_find_first(node, tag)
+      if (!is.na(content)) {
+        # Converter o texto extraído para UTF-8, forçando a conversão
+        return(iconv(xml_text(content), from = "", to = "UTF-8", sub = ""))
+      } else {
+        return(NA)
+      }
+    }
+    
+    # Extraindo informações para cada item
+    titles <- sapply(items, extract_content, ".//title")
+    links <- sapply(items, extract_content, ".//link")
+    descriptions <- sapply(items, extract_content, ".//description")
+    pub_dates <- sapply(items, extract_content, ".//pubDate")
+    
+    # Usar parsedate::parse_date para converter as datas
+    pub_dates_converted <- parsedate::parse_date(pub_dates, approx = TRUE, default_tz = "UTC")
+    
+    # Criando o dataframe e adicionando a coluna do termo de busca e a data convertida
+    rss_df <- data.frame(
+      title = titles,
+      link = links,
+      description = descriptions,
+      pubDate = pub_dates,
+      data_formatada = format(pub_dates_converted, "%d/%m/%Y"),  # Coluna com a data formatada
+      search_term = query,  # Adiciona a coluna com o termo de busca
+      stringsAsFactors = FALSE
+    )
+    
+    # Remover o arquivo temporário
+    unlink(temp_file)
+    
+    return(rss_df)
+  } else {
+    cat("Erro ao acessar o feed RSS:", url, "- Status code:", status_code(response), "\n")
+    # Remover o arquivo temporário
+    unlink(temp_file)
+    return(NULL)
+  }
+}
+
+# Gerar as URLs baseadas nas queries
+urls <- sapply(queries, generate_url)
+
+# Extrair dados de todos os feeds e combinar em um único dataframe, incluindo o termo de busca
+all_rss_data <- do.call(rbind, lapply(seq_along(urls), function(i) extract_rss_data(urls[i], queries[i])))
+
+# Verificar se os dados foram extraídos corretamente
+if (!is.null(all_rss_data)) {
+  # Exibir o dataframe combinado
+  print(all_rss_data)
+} else {
+  cat("Nenhum dado foi extraído.\n")
+}
